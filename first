@@ -1,0 +1,72 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+map<char, vector<string>> grammar;
+map<char, set<char>> firstSet;
+
+bool isTerminal(char c) {
+    return !isupper(c);  
+
+void findFirst(char symbol) {
+    if (!firstSet[symbol].empty()) return;
+
+    for (auto prod : grammar[symbol]) {
+        // For each production A → α
+        for (int i = 0; i < prod.size(); i++) {
+            char c = prod[i];
+
+            if (isTerminal(c)) {
+                firstSet[symbol].insert(c);
+                break;
+            } else {
+                // Non-terminal: compute FIRST(c) if not already done
+                findFirst(c);
+
+                // Add everything from FIRST(c) except ε
+                for (char x : firstSet[c]) {
+                    if (x != '#') firstSet[symbol].insert(x);
+                }
+
+                // If ε in FIRST(c), continue; else stop
+                if (firstSet[c].find('#') == firstSet[c].end())
+                    break;
+                else if (i == prod.size() - 1)
+                    firstSet[symbol].insert('#');
+            }
+        }
+    }
+}
+
+int main() {
+    int n;
+    cout << "Enter number of productions: ";
+    cin >> n;
+    cout << "Enter productions (Format: E->E+T or T->id):\n";
+
+    for (int i = 0; i < n; i++) {
+        string rule;
+        cin >> rule;
+
+        char lhs = rule[0];
+        string rhs = rule.substr(3); // skip "A->"
+        grammar[lhs].push_back(rhs);
+    }
+
+    cout << "\n--- FIRST Sets ---\n";
+
+    for (auto &g : grammar)
+        findFirst(g.first);
+
+    for (auto &p : firstSet) {
+        cout << "FIRST(" << p.first << ") = { ";
+        bool first = true;
+        for (char c : p.second) {
+            if (!first) cout << ", ";
+            cout << c;
+            first = false;
+        }
+        cout << " }\n";
+    }
+
+    return 0;
+}
