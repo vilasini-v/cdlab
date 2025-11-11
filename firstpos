@@ -1,0 +1,332 @@
+#include <iostream>
+#include <set>
+#include <map>
+#include <stack>
+#include <string>
+#include <vector>
+#include <cctype>
+using namespace std;
+
+// Node structure for syntax tree
+struct Node {
+    char symbol;           // Symbol (operand or operator)
+    bool nullable;         // Nullable property
+    set<int> firstpos;     // FIRSTPOS set
+    set<int> lastpos;      // LASTPOS set
+    Node* left;            // Left child
+    Node* right;           // Right child
+    int position;          // Position (for leaf nodes)
+    
+    Node(char c) : symbol(c), nullable(false), left(nullptr), right(nullptr), position(-1) {}
+};
+
+// Global position counter
+int posCounter = 1;
+map<int, char> posToSymbol;  // Maps position to symbol
+
+// Function to compute nullable, firstpos, and lastpos
+void computeProperties(Node* node) {
+    if (!node) return;
+    
+    // Leaf node (operand)
+    if (node->left == nullptr && node->right == nullptr) {
+        if (node->symbol == 'ε') {  // Epsilon
+            node->nullable = true;
+            // firstpos and lastpos are empty
+        } else {  // Regular symbol
+            node->nullable = false;
+            node->firstpos.insert(node->position);
+            node->lastpos.insert(node->position);
+        }
+        return;
+    }
+    
+    // Recursively compute for children
+    computeProperties(node->left);
+    computeProperties(node->right);
+    
+    // Internal node (operator)
+    if (node->symbol == '|') {  // Union (OR)
+        node->nullable = node->left->nullable || node->right->nullable;
+        
+        // firstpos(n) = firstpos(left) ∪ firstpos(right)
+        node->firstpos = node->left->firstpos;
+        node->firstpos.insert(node->right->firstpos.begin(), node->right->firstpos.end());
+        
+        // lastpos(n) = lastpos(left) ∪ lastpos(right)
+        node->lastpos = node->left->lastpos;
+        node->lastpos.insert(node->right->lastpos.begin(), node->right->lastpos.end());
+    }
+    else if (node->symbol == '.') {  // Concatenation
+        node->nullable = node->left->nullable && node->right->nullable;
+        
+        // firstpos(n) = firstpos(left) if left not nullable, else firstpos(left) ∪ firstpos(right)
+        if (node->left->nullable) {
+            node->firstpos = node->left->firstpos;
+            node->firstpos.insert(node->right->firstpos.begin(), node->right->firstpos.end());
+        } else {
+            node->firstpos = node->left->firstpos;
+        }
+        
+        // lastpos(n) = lastpos(right) if right not nullable, else lastpos(left) ∪ lastpos(right)
+        if (node->right->nullable) {
+            node->lastpos = node->left->lastpos;
+            node->lastpos.insert(node->right->lastpos.begin(), node->right->lastpos.end());
+        } else {
+            node->lastpos = node->right->lastpos;
+        }
+    }
+    else if (node->symbol == '*') {  // Kleene star
+        node->nullable = true;
+        node->firstpos = node->left->firstpos;
+        node->lastpos = node->left->lastpos;
+    }
+    else if (node->symbol == '+') {  // Plus (one or more)
+        node->nullable = node->left->nullable;
+        node->firstpos = node->left->firstpos;
+        node->lastpos = node->left->lastpos;
+    }
+    else if (node->symbol == '?') {  // Optional (zero or one)
+        node->nullable = true;
+        node->firstpos = node->left->firstpos;
+        node->lastpos = node->left->lastpos;
+    }
+}
+
+// Add explicit concatenation operators
+string addConcatOperator(const string& regex) {
+    string result = "";
+    for (int i = 0; i < regex.length(); i++) {
+        result += regex[i];
+        
+        if (i + 1 < regex.length()) {
+            char curr = regex[i];
+            char next = regex[i + 1];
+            
+            // Add '.' if concatenation is implied
+            if ((isalnum(curr) || curr == ')' || curr == '*' || curr == '+' || curr == '?') &&
+                (isalnum(next) || next == '(')) {
+                result += '.';
+            }
+        }
+    }
+    return result;
+}
+
+// Get operator precedence
+int precedence(char op) {
+    if (op == '|') return 1;
+    if (op == '.') return 2;
+    if (op == '*' || op == '+' || op == '?') return 3;
+    return 0;
+}
+
+// Convert infix to postfix
+string infixToPostfix(const string& regex) {
+    stack<char> ops;
+    string postfix = "";
+    
+    for (char c : regex) {
+        if (isalnum(c) || c == '#' || c == 'ε') {
+            postfix += c;
+        }
+        else if (c == '(') {
+            ops.push(c);
+        }
+        else if (c == ')') {
+            while (!ops.empty() && ops.top() != '(') {
+                postfix += ops.top();
+                ops.pop();
+            }
+            if (!ops.empty()) ops.pop(); // Remove '('
+        }
+        else {  // Operator
+            while (!ops.empty() && ops.top() != '(' && 
+                   precedence(ops.top()) >= precedence(c)) {
+                postfix += ops.top();
+                ops.pop();
+            }
+            ops.push(c);
+        }
+    }
+    
+    while (!ops.empty()) {
+        postfix += ops.top();
+        ops.pop();
+    }
+    
+    return postfix;
+}
+
+// Build syntax tree from postfix expression
+Node* buildTree(const string& postfix) {
+    stack<Node*> stk;
+    
+    for (char c : postfix) {
+        if (isalnum(c) || c == '#' || c == 'ε') {
+            Node* node = new Node(c);
+            if (c != 'ε') {
+                node->position = posCounter;
+                posToSymbol[posCounter] = c;
+                posCounter++;
+            }
+            stk.push(node);
+        }
+        else if (c == '*' || c == '+' || c == '?') {
+            Node* node = new Node(c);
+            node->left = stk.top();
+            stk.pop();
+            stk.push(node);
+        }
+        else {  // Binary operators (.|)
+            Node* node = new Node(c);
+            node->right = stk.top();
+            stk.pop();
+            node->left = stk.top();
+            stk.pop();
+            stk.push(node);
+        }
+    }
+    
+    return stk.empty() ? nullptr : stk.top();
+}
+
+// Helper function to print a set
+void printSet(const set<int>& s) {
+    cout << "{ ";
+    for (int val : s) {
+        cout << val << " ";
+    }
+    cout << "}";
+}
+
+// Helper function to print node properties
+void printNode(Node* node, const string& label) {
+    if (!node) return;
+    cout << label << " ('" << node->symbol << "'):\n";
+    cout << "  Nullable: " << (node->nullable ? "true" : "false") << "\n";
+    cout << "  FIRSTPOS: ";
+    printSet(node->firstpos);
+    cout << "\n  LASTPOS: ";
+    printSet(node->lastpos);
+    cout << "\n\n";
+}
+
+// Process and display results for a regular expression
+void processRegex(const string& regex) {
+    // Reset global variables
+    posCounter = 1;
+    posToSymbol.clear();
+    
+    cout << "\n========================================\n";
+    cout << "Regular Expression: " << regex << endl;
+    cout << "========================================\n\n";
+    
+    // Add concatenation operators
+    string withConcat = addConcatOperator(regex);
+    cout << "After adding concat operators: " << withConcat << "\n";
+    
+    // Convert to postfix
+    string postfix = infixToPostfix(withConcat);
+    cout << "Postfix notation: " << postfix << "\n\n";
+    
+    // Build tree
+    Node* root = buildTree(postfix);
+    
+    if (!root) {
+        cout << "Error: Failed to build syntax tree!\n";
+        return;
+    }
+    
+    // Compute properties
+    computeProperties(root);
+    
+    // Print position mapping
+    cout << "Position Mapping:\n";
+    for (auto& p : posToSymbol) {
+        cout << "  Position " << p.first << ": " << p.second << "\n";
+    }
+    cout << "\n";
+    
+    // Print root properties
+    cout << "Root Node Properties:\n";
+    cout << "  Nullable: " << (root->nullable ? "true" : "false") << "\n";
+    cout << "  FIRSTPOS: ";
+    printSet(root->firstpos);
+    cout << "\n  LASTPOS: ";
+    printSet(root->lastpos);
+    cout << "\n";
+}
+
+int main() {
+    // Example: (a|b)*abb#
+    // Syntax tree construction for demonstration
+    
+    int pos = 1;
+    
+    // Leaf nodes
+    Node* a1 = new Node('a'); a1->position = pos++;
+    Node* b1 = new Node('b'); b1->position = pos++;
+    Node* a2 = new Node('a'); a2->position = pos++;
+    Node* b2 = new Node('b'); b2->position = pos++;
+    Node* b3 = new Node('b'); b3->position = pos++;
+    Node* end = new Node('#'); end->position = pos++;
+    
+    // (a|b)
+    Node* union1 = new Node('|');
+    union1->left = a1;
+    union1->right = b1;
+    
+    // (a|b)*
+    Node* star = new Node('*');
+    star->left = union1;
+    
+    // abb
+    Node* concat1 = new Node('.');
+    concat1->left = a2;
+    concat1->right = b2;
+    
+    Node* concat2 = new Node('.');
+    concat2->left = concat1;
+    concat2->right = b3;
+    
+    // (a|b)*abb
+    Node* concat3 = new Node('.');
+    concat3->left = star;
+    concat3->right = concat2;
+    
+    // (a|b)*abb#
+    Node* root = new Node('.');
+    root->left = concat3;
+    root->right = end;
+    
+    // Compute properties
+    computeProperties(root);
+    
+    // Print results
+    cout << "Regular Expression: (a|b)*abb#\n\n";
+    cout << "Position mapping:\n";
+    cout << "  Position 1: a\n";
+    cout << "  Position 2: b\n";
+    cout << "  Position 3: a\n";
+    cout << "  Position 4: b\n";
+    cout << "  Position 5: b\n";
+    cout << "  Position 6: #\n\n";
+    
+    cout << "FIRSTPOS and LASTPOS for each node:\n\n";
+    
+    printNode(a1, "Node a1");
+    printNode(b1, "Node b1");
+    printNode(union1, "Node (a|b)");
+    printNode(star, "Node (a|b)*");
+    printNode(a2, "Node a2");
+    printNode(b2, "Node b2");
+    printNode(concat1, "Node ab");
+    printNode(b3, "Node b3");
+    printNode(concat2, "Node abb");
+    printNode(concat3, "Node (a|b)*abb");
+    printNode(end, "Node #");
+    printNode(root, "Root node");
+    
+    return 0;
+}
