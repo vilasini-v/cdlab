@@ -3,30 +3,33 @@ using namespace std;
 
 map<char, vector<string>> grammar;
 map<char, set<char>> firstSet;
+map<char, set<char>> followSet;
+char startSymbol;
 
 bool isTerminal(char c) {
-    return !isupper(c);  
+    return !isupper(c);
+}
 
 void findFirst(char symbol) {
     if (!firstSet[symbol].empty()) return;
-
+    
     for (auto prod : grammar[symbol]) {
         // For each production A → α
         for (int i = 0; i < prod.size(); i++) {
             char c = prod[i];
-
+            
             if (isTerminal(c)) {
                 firstSet[symbol].insert(c);
                 break;
             } else {
                 // Non-terminal: compute FIRST(c) if not already done
                 findFirst(c);
-
+                
                 // Add everything from FIRST(c) except ε
                 for (char x : firstSet[c]) {
                     if (x != '#') firstSet[symbol].insert(x);
                 }
-
+                
                 // If ε in FIRST(c), continue; else stop
                 if (firstSet[c].find('#') == firstSet[c].end())
                     break;
@@ -37,26 +40,113 @@ void findFirst(char symbol) {
     }
 }
 
+set<char> getFirstOfString(string str) {
+    set<char> result;
+    
+    for (int i = 0; i < str.size(); i++) {
+        char c = str[i];
+        
+        if (isTerminal(c)) {
+            result.insert(c);
+            return result;
+        } else {
+            // Add FIRST(c) except ε
+            for (char x : firstSet[c]) {
+                if (x != '#') result.insert(x);
+            }
+            
+            // If ε not in FIRST(c), stop
+            if (firstSet[c].find('#') == firstSet[c].end())
+                return result;
+            else if (i == str.size() - 1)
+                result.insert('#');
+        }
+    }
+    
+    return result;
+}
+
+void findFollow() {
+    // Step 1: Add $ to FOLLOW of start symbol
+    followSet[startSymbol].insert('$');
+    
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        
+        // For each production A → α
+        for (auto &g : grammar) {
+            char A = g.first;
+            
+            for (auto &prod : g.second) {
+                // For each symbol B in production
+                for (int i = 0; i < prod.size(); i++) {
+                    char B = prod[i];
+                    
+                    // Only process non-terminals
+                    if (!isTerminal(B)) {
+                        // Get β (remaining string after B)
+                        string beta = prod.substr(i + 1);
+                        
+                        if (beta.empty()) {
+                            // Case 1: A → αB (B is last)
+                            // FOLLOW(B) += FOLLOW(A)
+                            int oldSize = followSet[B].size();
+                            for (char x : followSet[A]) {
+                                followSet[B].insert(x);
+                            }
+                            if (followSet[B].size() > oldSize) changed = true;
+                        } else {
+                            // Case 2: A → αBβ
+                            // FOLLOW(B) += FIRST(β) - {ε}
+                            set<char> firstBeta = getFirstOfString(beta);
+                            int oldSize = followSet[B].size();
+                            
+                            for (char x : firstBeta) {
+                                if (x != '#') {
+                                    followSet[B].insert(x);
+                                }
+                            }
+                            
+                            // If ε in FIRST(β), FOLLOW(B) += FOLLOW(A)
+                            if (firstBeta.find('#') != firstBeta.end()) {
+                                for (char x : followSet[A]) {
+                                    followSet[B].insert(x);
+                                }
+                            }
+                            
+                            if (followSet[B].size() > oldSize) changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main() {
     int n;
     cout << "Enter number of productions: ";
     cin >> n;
+    
     cout << "Enter productions (Format: E->E+T or T->id):\n";
-
     for (int i = 0; i < n; i++) {
         string rule;
         cin >> rule;
-
         char lhs = rule[0];
+        
+        // First production's LHS is start symbol
+        if (i == 0) startSymbol = lhs;
+        
         string rhs = rule.substr(3); // skip "A->"
         grammar[lhs].push_back(rhs);
     }
-
+    
+    // Compute FIRST sets
     cout << "\n--- FIRST Sets ---\n";
-
     for (auto &g : grammar)
         findFirst(g.first);
-
+    
     for (auto &p : firstSet) {
         cout << "FIRST(" << p.first << ") = { ";
         bool first = true;
@@ -67,6 +157,22 @@ int main() {
         }
         cout << " }\n";
     }
-
+    
+    // Compute FOLLOW sets
+    findFollow();
+    
+    cout << "\n--- FOLLOW Sets ---\n";
+    for (auto &g : grammar) {
+        char symbol = g.first;
+        cout << "FOLLOW(" << symbol << ") = { ";
+        bool first = true;
+        for (char c : followSet[symbol]) {
+            if (!first) cout << ", ";
+            cout << c;
+            first = false;
+        }
+        cout << " }\n";
+    }
+    
     return 0;
 }
